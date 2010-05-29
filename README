@@ -1,0 +1,10 @@
+TSP SOLVER THAT USES ANT COLONY OPTIMISATION ON CUDA
+
+In order to compile files use ordinary CUDA compiler and SDK, such as v1.3 or later.
+In order to run the executables, the machine has to have a CUDA-enabled GPU.
+
+Usage: The test files have to be speciafied in as the first argument and the answer must follow next.
+
+If having problems on Windows, it is probably a problem with Visual Studio.
+
+Code written by: Ruslan Kudubayev (ruslan.kudubayev@gmail.com)

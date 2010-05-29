@@ -24,15 +24,14 @@ __global__ void colonise(float* C, int* A, float* Rand, int* d_best, int* d_path
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     
-    int antid = ((bx+by)*BLOCK_SIZE+(tx+ty)) % n;
-    int cloneid = ((bx+by)*BLOCK_SIZE+(tx+ty)) / n;
+    int antid = ((bx+by)*BLOCK_SIZE+(tx+ty));
     
     //calculate the offset in the Rand array
-    int offset = (antid*CLONES + cloneid)*(2*n-2);
+    int offset = antid*(2*n-1);
+        
+    float ra = Rand[offset + 2*n-2];
     
-    float ra;
-    
-    int startNode = (antid+cloneid)%n;
+    int startNode = ((int)(ra*n))%n;
     int curNode =  startNode;
     int visited[WA];
     for (int i=0; i<n; ++i) visited[i] = -1;
@@ -50,8 +49,12 @@ __global__ void colonise(float* C, int* A, float* Rand, int* d_best, int* d_path
     		float max = -1.0f;
     		int first = 1;
     		for (int i=0; i<n; ++i) if (visited[i]==-1 && i!=curNode) {
-    			if (first || C[curNode*n+i] > max) {
-    				max = C[curNode*n+i];
+    			float eeta, phe;
+    			if (A[curNode*n+i]==0) eeta = 1.1f;
+    			else eeta = (1.0f/A[curNode*n+i]);
+    			phe = C[curNode*n+i] * eeta;
+    			if (first || phe > max) {
+    				max = phe;
     				nNode = i;
     				first = 0;
     			}
@@ -93,7 +96,7 @@ __global__ void colonise(float* C, int* A, float* Rand, int* d_best, int* d_path
     		cost = cost + A[curNode*n+nNode];
     		visited[curNode] = nNode;
 	    	// apply local updating rule right now.
-			C[curNode*n+nNode] = (1.0f - R) * C[curNode*n+nNode] + (R * tau0);
+			C[curNode*n+nNode] = (1.0f - R) * C[curNode*n+nNode] + tau0;
 			// move on
     		curNode = nNode;
     	} else {
@@ -109,9 +112,9 @@ __global__ void colonise(float* C, int* A, float* Rand, int* d_best, int* d_path
     if (collected == n) {
     	cost = cost + A[curNode*n+startNode];
     	visited[curNode] = startNode;
-    	C[curNode*n+startNode] = (1.0f - R) * C[curNode*n+startNode] + (R * tau0);
+    	C[curNode*n+startNode] = (1.0f - R) * C[curNode*n+startNode] + tau0;
     
-	    // after done, evaluate the path with the best achieved so far
+	    // after done, compare the path with the best achieved so far
    		if (cost < *d_best) {
     		*d_best = cost;
     		for (int i=0; i<n; ++i) d_path[i] = visited[i];
@@ -140,9 +143,9 @@ __global__ void update_pheromones(float* C, int* d_best, int* d_path, const int 
 	    float evaporation = C[i*n+j] * (1.0f - A);
 	    
 	    if (d_path[i] == j) {
-   			deposition = A/(*d_best);
-   			C[i*n+j] = evaporation+deposition;
+   			deposition = A/(*d_best);	
     	}
+    	C[i*n+j] = evaporation+deposition;
     }
 }
 #endif // #ifndef _TSP_ANTCOLONY_KERNEL_H_

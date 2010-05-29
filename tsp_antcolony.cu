@@ -67,7 +67,7 @@ void getGraph(int* data, int size) {
     fclose(infile);  /* Close the file */
 }
 
-void outputfordotformatf(char* filename, float* data, int* path, int size, float scale)
+void outputfordotformatf(char* filename, int* delta, float* data, int* path, int size, float scale)
 {
 	FILE *outfile;
 	/* Open the file.  If NULL is returned there was an error */
@@ -79,7 +79,7 @@ void outputfordotformatf(char* filename, float* data, int* path, int size, float
 	fputs("digraph G{\n",outfile);
 	
 	for (int i = 0; i < size; ++i) {
-		for (int j = 0; j < size; ++j) if (i!=j && abs(data[i*size+j])>=1e-16) {
+		for (int j = 0; j < size; ++j) if (i!=j && abs(data[i*size+j])>=1e-16 && delta[i*size+j]<1000000) {
 			if (path[i] == j) {
         		fprintf(outfile,"	%d -> %d [label=\"%f\", penwidth=%f, color=red];\n", i, j, data[i*size+j], data[i*size+j]*scale);
 			} else {
@@ -142,7 +142,6 @@ float nearest_neighbour(int* h_A, int size) {
 	return res;
 }
 
-
 //Align a to nearest higher multiple of b
 extern "C" int iAlignUp(int a, int b){
     return ((a % b) != 0) ?  (a - a % b + b) : a;
@@ -155,49 +154,6 @@ extern "C" int iDivUp(int a, int b){
 
 extern "C" void initMTRef(const char *fname);
 
-void study(float* C, int* A, const int n) {
-			int curNode = 0;
-			int nNode = -1;
-	    	float sum = 0.0f;
-	    	float sump = 0.0f;
-	    	int visited[WA];
-	    	for (int i=0; i<n; i++) visited[i] = -1;
-	    	visited[curNode] = 0;
-    		// calculate the sum
-    		for (int i=0; i<n; ++i) if (visited[i] == -1 && i!=curNode) {
-    			// take care of the zero divisions...
-    			float eeta;
-    			if (A[curNode*n+i]==0) eeta = 1.1f;
-    			else eeta = (1.0f/A[curNode*n+i]);
-    			sum += C[curNode*n+i] * eeta;
-    		}
-	    	printf("sum = %1.20f\n", sum);
-    		//generate a random number
-	    	float ra = (float)rand() / 140009999;
-	    	printf("We had r = %1.20f\n", ra);
-	    	float target = ra * sum; // precalculate this for the p formula division
-    		// calculate the probability and jump if that probability occurs this time.
-	    	printf("target = %1.20f\n", target);
-    		for (int i=0; i<n; ++i) if (visited[i] == -1 && i!=curNode) {
-    			// calculate the probability as per the equation before.
-    			float p;
-    			float eeta;
-    			if (A[curNode*n+i]==0) eeta = 1.1f;
-    			else eeta = (1.0f/A[curNode*n+i]);
-    			// p calculated here with squaring eeta for better results
-    			p = (C[curNode*n+i] * eeta);
-    			printf("p = %1.20f, sump = %1.20f\n", p, sump);
-    			if (target>sump && target<=p+sump) {
-    				// yes. move.
-    				nNode = i;
-    				break;
-    			}
-    			nNode = i;
-    			sump += p;
-    		}
-    		printf("We choose %d\n", nNode);
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // Run test
 ////////////////////////////////////////////////////////////////////////////////
@@ -206,44 +162,44 @@ void runTest(int argc, char** argv)
 	char* filenametotest;
 	int targetanswer;
 	if (argc > 2) {
+		// parameters to the executable:
+		// 1. filename
+		// 2. the answer to the problem as an integer 
 		filenametotest = argv[1];
 		targetanswer = atoi(argv[2]);
 	}
+	// get the size of the problem from the file first
     const int n = getSize(filenametotest);
-    int blocks = iDivUp(n, BLOCK_SIZE);
     
-    int blocks_with_clones = iDivUp(n*CLONES, BLOCK_SIZE);
-    
+    // dividing the number of ants evenly into blocks for computation
+    int blocks = iDivUp(ANTS, BLOCK_SIZE);
+    printf("Blocks: %d\n", blocks);
+        
     // allocate host memory for matrice A
     unsigned int size_A = n * n;
     unsigned int mem_size_A = sizeof(int) * size_A;
     int* h_A = (int*) malloc(mem_size_A);
     getGraph(h_A, n);
     
-    //if( cutCheckCmdLineFlag(argc, (const char**)argv, "device") )
-    //    cutilDeviceInit(argc, argv);
-    //else
-        cudaSetDevice( cutGetMaxGflopsDeviceId() );
+    cudaSetDevice( cutGetMaxGflopsDeviceId() );
 
     // set seed for rand()
-    srand(2010);
+    srand((unsigned)time(NULL));
     
 		/*
-		This routine is responsible for generating random numbers on the device and leaving
+		This routine is responsible for preparing to generating random numbers on the device and leaving
 		them there for the other kernel to use.
 		*/
    		float *d_Rand;
    		
-   		int path_n = (2*n-2) * BLOCK_SIZE * blocks_with_clones;
+   		int path_n = (2*n-1) * BLOCK_SIZE * blocks;
    		
 		int n_per_rng = iAlignUp(iDivUp(path_n, MT_RNG_COUNT), 2);
 		int rand_n = MT_RNG_COUNT * n_per_rng;
 	
-    	printf("Initializing data on the device for %i random samples...\n", path_n);
+    	//printf("Initializing data on the device for %i random samples...\n", path_n);
         cutilSafeCall( cudaMalloc((void **)&d_Rand, rand_n * sizeof(float)) );
         
-        //const char *raw_path = cutFindFilePath("MersenneTwister.raw", "");
-        //const char *dat_path = cutFindFilePath("MersenneTwister.dat", "");
         initMTRef("MersenneTwister.raw");
         loadMTGPU("MersenneTwister.dat");
         
@@ -263,12 +219,8 @@ void runTest(int argc, char** argv)
     // allocate host memory for the tau on host
     float* h_C = (float*) malloc(mem_size_C);
     //initialise pheromones tau matrix
-    //double sum = 0;
-    //for (int i=0; i<size_A; ++i) sum += h_A[i];
-    //float h_a_average = sum / (n*n);
-    //float tau0 = 1.0f / (h_a_average * (float)n);
     float tau0 = 1.0f/((float)n * nearest_neighbour(h_A, n));  
-    printf("tau0: %1.20f\n", tau0);
+    //printf("tau0: %1.20f\n", tau0);
     for (int i=0; i<size_C; ++i) h_C[i] = tau0;
     // copy host memory to device
     cutilSafeCall(cudaMemcpy(d_C, h_C, mem_size_C,
@@ -285,16 +237,17 @@ void runTest(int argc, char** argv)
     cutilSafeCall(cudaMemcpy(d_P, h_P, mem_size_P,
                               cudaMemcpyHostToDevice) );
     
-    // allocate device memory for best so far
+    // allocate device memory for best on the iteration
     int* d_best;
     cutilSafeCall(cudaMalloc((void**) &d_best, sizeof(int)));
     // allocate host memory for the best on host
     int* h_best = (int*)malloc(sizeof(int));
     *h_best = 2147483647;
+    int global_best = 2147483647;
     // copy host memory to device
     cutilSafeCall(cudaMemcpy(d_best, h_best, sizeof(int),
                               cudaMemcpyHostToDevice) ); 
-    
+
     // create and start timer
     unsigned int timer = 0;
     cutilCheckError(cutCreateTimer(&timer));
@@ -307,41 +260,61 @@ void runTest(int argc, char** argv)
     dim3 grid2(side_blocks, side_blocks);
 
 	// *****************************************************
+	// outputfordotformatf("tau_graph0.dot",h_A,h_C,h_P,n,500.0f);
 	// the main block of code that executes the kernel.
 	int firsttimeto20 = 0;
 	for (int iteration=0; iteration<2048; ++iteration) {
 		//generate random numbers for this iteration
-		seedMTGPU(rand()%2048);
+		seedMTGPU(rand()%100000);
 		RandomGPU<<<32, 128>>>(d_Rand, n_per_rng);
         cutilCheckMsg("RandomGPU() execution failed\n");
         cutilSafeCall( cudaThreadSynchronize() );
 	
+		// this is actually the rho and phi constants that are just taken to be the same value.
 		float damping = 0.1f;
 		
     	// execute the kernel
-    	colonise<<< blocks_with_clones, BLOCK_SIZE >>>(d_C, d_A, d_Rand, d_best, d_P, n, damping, tau0);
+    	colonise<<< blocks, BLOCK_SIZE >>>(d_C, d_A, d_Rand, d_best, d_P, n, damping, tau0);
         cutilSafeCall( cudaThreadSynchronize() );
-  	
+          	
     	// get the best so far
 	    cutilSafeCall(cudaMemcpy(h_best, d_best, sizeof(int),
                               cudaMemcpyDeviceToHost) );
+    	cutilSafeCall(cudaMemcpy(h_P, d_P, mem_size_P,
+                              cudaMemcpyDeviceToHost) );
+	    cutilSafeCall(cudaMemcpy(h_C, d_C, mem_size_C,
+                              cudaMemcpyDeviceToHost) );
+            
+            
+        /*
+        if (iteration==0 || iteration==1 || iteration==2 || iteration==3 || iteration==5 || iteration==6 || iteration==10 || iteration==15 || iteration==20 || iteration==25 || iteration==30 || iteration==100 || iteration==500 || iteration==1000 || iteration==2000) {
+        	char name[100] = "tau_graphN.dot";
+        	sprintf(name, "tau_graph%d.dot", iteration+1);
+        	outputfordotformatf(name,h_A,h_C,h_P,n,500.0f);
+        }
+        */
+        
         // record when we get to 20% accuracy
         if ((firsttimeto20 == 0) && (((float)*h_best/targetanswer) <= 1.2f)) {
         	firsttimeto20 = 1;
         	printf("First time to 20 percent accuracy: %f (ms) \n", cutGetTimerValue(timer));
+        	printf("Convergenece interation: %d\n",iteration+1);
         }
         // if reached the optimal answer then quit, no point to work anymore.
-    	if (*h_best == targetanswer) break;
+    	//if (*h_best == targetanswer) break;
     	
     	// global updating rule here.
     	// can just execute another kernel here which would do that.
     	// the reason is to not copy all the data forth and back but do modifications over there.
-    	//if (rand() <= (((float)(iteration%256))/256.0f)) {
-    		update_pheromones<<< grid2, threads2 >>>(d_C, d_best, d_P, n, damping);
-        	cutilSafeCall( cudaThreadSynchronize() );
-        	//blocks = blocks % 8 + 2;
-        //}
-        
+    	update_pheromones<<< grid2, threads2 >>>(d_C, d_best, d_P, n, damping);
+        cutilSafeCall( cudaThreadSynchronize() );
+
+        if (*h_best < global_best) {
+        	global_best = *h_best;
+        }
+  		*h_best = 2147483647;
+    	cutilSafeCall(cudaMemcpy(d_best, h_best, sizeof(int),
+                              cudaMemcpyHostToDevice) ); 
     }
     // ******************************************************  
 
@@ -361,17 +334,14 @@ void runTest(int argc, char** argv)
                               cudaMemcpyDeviceToHost) );
     cutilSafeCall(cudaMemcpy(h_best, d_best, sizeof(int),
                               cudaMemcpyDeviceToHost) );
-                              
-    // just looking how this works.
-    study(h_C, h_A, n);
 
-    printf("Result: %d\n", *h_best);
+    printf("Result: %d\n", global_best);
 
-    printf("Tau:\n");
-    printArr(h_C,n);
+    //printf("Tau:\n");
+    //printArr(h_C,n);
     
-    outputfordotformati("original_graph.dot",h_A,h_P,n,0.1f);
-    outputfordotformatf("tau_graph.dot",h_C,h_P,n,12000.0f);
+    //outputfordotformati("original_graph.dot",h_A,h_P,n,0.1f);
+    outputfordotformatf("tau_graph.dot",h_A,h_C,h_P,n,1200.0f);
 
     // clean up memory
     free(h_A);

@@ -9,10 +9,10 @@
 // Thread block size
 #define BLOCK_SIDE_UPDATER 16
 
-#define WA 150 // Visited width, static for now
+#define WA 400 // Visited width, static for now
 
 // the number of clones per base ant
-#define CLONES 10
+#define ANTS 512
 
 #endif // _TSP_ANTCOLONY_H_
 
